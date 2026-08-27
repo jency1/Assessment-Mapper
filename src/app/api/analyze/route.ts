@@ -4,7 +4,10 @@ import { EXTRACTION_PROMPT } from "@/lib/prompt";
 
 import type {
   AnalysisResult,
-  MappingStatus
+  AnswerRegion,
+  Mapping,
+  MappingStatus,
+  Question
 } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -26,8 +29,14 @@ function cleanJson(text: string): string {
     .trim();
 }
 
-function normalizeMarks(value: unknown): number | undefined {
-  if (value === null || value === undefined || value === "") {
+function normalizeMarks(
+  value: unknown
+): number | undefined {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
     return undefined;
   }
 
@@ -36,39 +45,44 @@ function normalizeMarks(value: unknown): number | undefined {
   if (!Number.isFinite(number)) {
     return undefined;
   }
+
   if (number < 0) {
     return 0;
   }
+
   return number;
 }
 
 function fileToPart(file: File) {
   return file.arrayBuffer().then((buffer) => ({
     inline_data: {
-      mime_type: file.type || "application/octet-stream",
-      data: Buffer.from(buffer).toString("base64")
+      mime_type:
+        file.type ||
+        "application/octet-stream",
+      data: Buffer.from(buffer).toString(
+        "base64"
+      )
     }
   }));
 }
 
-function normalizeResult(raw: any): AnalysisResult {
-  const questions = Array.isArray(raw?.questions)
-    ? raw.questions
-    : [];
+function normalizeResult(
+  raw: any
+): AnalysisResult {
+  const questions =
+    Array.isArray(raw?.questions)
+      ? raw.questions
+      : [];
 
-  const answers = Array.isArray(raw?.answers)
-    ? raw.answers
-    : [];
+  const answers =
+    Array.isArray(raw?.answers)
+      ? raw.answers
+      : [];
 
-  const mappings = Array.isArray(raw?.mappings)
-    ? raw.mappings
-    : [];
-
-  /*
-   * --------------------------------------------------
-   * QUESTIONS
-   * --------------------------------------------------
-   */
+  const mappings =
+    Array.isArray(raw?.mappings)
+      ? raw.mappings
+      : [];
 
   const normalizedQuestions =
     questions.map(
@@ -128,12 +142,6 @@ function normalizeResult(raw: any): AnalysisResult {
       })
     );
 
-  /*
-   * --------------------------------------------------
-   * ANSWERS
-   * --------------------------------------------------
-   */
-
   const normalizedAnswers =
     answers.map(
       (
@@ -190,19 +198,14 @@ function normalizeResult(raw: any): AnalysisResult {
 
   const answerIds = new Set(
     normalizedAnswers.map(
-      (answer) => answer.id
+      (answer: AnswerRegion) =>
+        answer.id
     )
   );
 
-  /*
-   * --------------------------------------------------
-   * MAPPINGS
-   * --------------------------------------------------
-   */
-
   const normalizedMappings =
     normalizedQuestions.map(
-      (question) => {
+      (question: Question) => {
         const mapping =
           mappings.find(
             (item: any) =>
@@ -241,17 +244,6 @@ function normalizeResult(raw: any): AnalysisResult {
           status = "unanswered";
         }
 
-        /*
-         * IMPORTANT:
-         *
-         * maxMarks MUST come from
-         * the question paper.
-         *
-         * Do not rely only on Gemini
-         * returning maxMarks inside
-         * the mapping.
-         */
-
         const questionMarks =
           question.marks;
 
@@ -265,31 +257,16 @@ function normalizeResult(raw: any): AnalysisResult {
           aiMaxMarks ??
           0;
 
-        /*
-         * Get awarded marks from AI.
-         */
-
         let awardedMarks =
           normalizeMarks(
             mapping?.awardedMarks
           ) ?? 0;
-
-        /*
-         * Unanswered questions
-         * always receive 0.
-         */
 
         if (
           status === "unanswered"
         ) {
           awardedMarks = 0;
         }
-
-        /*
-         * Uncertain questions
-         * should not accidentally
-         * receive marks.
-         */
 
         if (
           status === "uncertain"
@@ -299,12 +276,6 @@ function normalizeResult(raw: any): AnalysisResult {
             maxMarks
           );
         }
-
-        /*
-         * Never allow AI to award
-         * more than the question's
-         * maximum marks.
-         */
 
         awardedMarks = Math.min(
           Math.max(
@@ -362,25 +333,25 @@ function normalizeResult(raw: any): AnalysisResult {
       }
     );
 
-  /*
-   * --------------------------------------------------
-   * SUMMARY
-   * --------------------------------------------------
-   */
-
   const totalMarks =
     normalizedMappings.reduce(
-      (total, mapping) =>
+      (
+        total: number,
+        mapping: Mapping
+      ) =>
         total +
-        mapping.maxMarks,
+        (mapping.maxMarks ?? 0),
       0
     );
 
   const obtainedMarks =
     normalizedMappings.reduce(
-      (total, mapping) =>
+      (
+        total: number,
+        mapping: Mapping
+      ) =>
         total +
-        mapping.awardedMarks,
+        (mapping.awardedMarks ?? 0),
       0
     );
 
@@ -398,7 +369,7 @@ function normalizeResult(raw: any): AnalysisResult {
   const mappedAnswerIds =
     new Set(
       normalizedMappings.flatMap(
-        (mapping) =>
+        (mapping: Mapping) =>
           mapping.answerIds
       )
     );
@@ -419,28 +390,30 @@ function normalizeResult(raw: any): AnalysisResult {
 
       answered:
         normalizedMappings.filter(
-          (mapping) =>
+          (mapping: Mapping) =>
             mapping.status ===
             "answered"
         ).length,
 
       unanswered:
         normalizedMappings.filter(
-          (mapping) =>
+          (mapping: Mapping) =>
             mapping.status ===
             "unanswered"
         ).length,
 
       uncertain:
         normalizedMappings.filter(
-          (mapping) =>
+          (mapping: Mapping) =>
             mapping.status ===
             "uncertain"
         ).length,
 
       unmatchedAnswers:
         normalizedAnswers.filter(
-          (answer) =>
+          (
+            answer: AnswerRegion
+          ) =>
             !mappedAnswerIds.has(
               answer.id
             )
@@ -634,19 +607,13 @@ export async function POST(
     const result =
       normalizeResult(parsed);
 
-    /*
-     * Temporary server-side debugging.
-     *
-     * Check your terminal after
-     * clicking Start Mapping.
-     */
-
     console.log(
       "QUESTION MARKS:",
       result.questions.map(
-        (question) => ({
+        (question: Question) => ({
           number:
             question.number,
+
           marks:
             question.marks
         })
